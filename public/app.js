@@ -398,10 +398,10 @@
     document.getElementById('totals').innerHTML = all.length
       ? '<div class="stats totals" aria-label="Totals of the items listed below">' +
           statCard('Total quantity', fmt(sum('quantity'))) +
-          statCard('Total Price (MMK)', fmt(sum('totalPriceMmk')), 'MMK') +
-          statCard('Total Selling Price (MMK)', fmt(sum('sellingPrice')), 'MMK') +
-          statCard('Total Net Amount (MMK)', fmt(sum('netAmount')), 'MMK', netClass(sum('netAmount'))) +
-          statCard('Calculated Net Amount (MMK)', fmt(calcNet), 'MMK', netClass(calcNet)) +
+          statCard('Total Price', fmt(sum('totalPriceMmk')), 'MMK') +
+          statCard('Total Selling Price', fmt(sum('sellingPrice')), 'MMK') +
+          statCard('Total Net Amount', fmt(sum('netAmount')), 'MMK', netClass(sum('netAmount'))) +
+          statCard('Calculated Net Amount', fmt(calcNet), 'MMK', netClass(calcNet)) +
         '</div>'
       : '';
 
