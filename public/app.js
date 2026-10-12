@@ -123,7 +123,16 @@
       body: JSON.stringify(body),
       redirect: 'follow',
     })
-      .then(function (res) { return res.json(); })
+      .then(function (res) {
+        return res.text().then(function (text) {
+          try { return JSON.parse(text); } catch (e) {
+            var local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+            throw new Error(local
+              ? 'The /api endpoint did not answer (HTTP ' + res.status + '). Run the site with "netlify dev" (see README, Run locally), not a plain file server, and check that .env contains APPS_SCRIPT_URL.'
+              : 'The server did not return valid data (HTTP ' + res.status + '). Please try again.');
+          }
+        });
+      })
       .then(function (json) {
         if (json.ok) return json.data;
         if (json.error === 'UNAUTHORIZED') {
@@ -520,10 +529,11 @@
   function compute(v) {
     var totalThb = r2(v.unitPrice * v.quantity);
     var totalMmk = r2(totalThb * v.rate);
-    var net = r2(v.sellingPrice - totalMmk);
+    var selling = r2(v.unitSellingPrice * v.quantity);
+    var net = r2(selling - totalMmk);
     var cost = r2(totalMmk + v.additionalCost);
-    var cnet = r2(v.sellingPrice + v.additionalDiscount - cost);
-    return { totalThb: totalThb, totalMmk: totalMmk, net: net, cost: cost, cnet: cnet };
+    var cnet = r2(selling + v.additionalDiscount - cost);
+    return { totalThb: totalThb, totalMmk: totalMmk, selling: selling, net: net, cost: cost, cnet: cnet };
   }
 
   function formPage(my, id) {
@@ -546,7 +556,7 @@
       date: today(), productCode: '', productName: '', productBrand: '',
       customerName: '', customerPhone: '', customerAddress: '',
       unitPrice: '', quantity: 1, rate: store.get(RATE_KEY) || '',
-      sellingPrice: '', additionalCost: '', additionalDiscount: '', remark: '',
+      unitSellingPrice: '', additionalCost: '', additionalDiscount: '', remark: '',
     };
 
     document.getElementById('content').innerHTML =
@@ -575,8 +585,9 @@
           outField('Total Price (MMK)', 'totalMmk', true) +
         '</div></section>' +
         '<section class="card section"><h2>Sale</h2><div class="fields">' +
-          field('Selling Price (MMK)', 'sellingPrice', { type: 'number', value: v.sellingPrice, placeholder: '0' }) +
-          outField('Net Amount (MMK)', 'net') +
+          field('Unit Selling Price (MMK)', 'unitSellingPrice', { type: 'number', value: v.unitSellingPrice, placeholder: '0' }) +
+          outField('Selling Price (MMK)', 'selling') +
+          outField('Net Amount (MMK)', 'net', true) +
         '</div></section>' +
         '<section class="card section"><h2>Adjustments</h2><div class="fields">' +
           field('Additional Cost (MMK)', 'additionalCost', { type: 'number', value: v.additionalCost, placeholder: '0' }) +
@@ -605,7 +616,7 @@
         unitPrice: num(form.unitPrice.value),
         quantity: num(form.quantity.value),
         rate: num(form.rate.value),
-        sellingPrice: num(form.sellingPrice.value),
+        unitSellingPrice: num(form.unitSellingPrice.value),
         additionalCost: num(form.additionalCost.value),
         additionalDiscount: num(form.additionalDiscount.value),
         remark: form.remark.value.trim(),
@@ -619,7 +630,7 @@
         el.textContent = fmt(val, 0, 2);
         if (signed) el.className = netClass(val);
       };
-      set('totalThb', c.totalThb); set('totalMmk', c.totalMmk);
+      set('totalThb', c.totalThb); set('totalMmk', c.totalMmk); set('selling', c.selling);
       set('net', c.net, true); set('cost', c.cost); set('cnet', c.cnet, true);
     }
     form.addEventListener('input', refresh);
@@ -662,7 +673,7 @@
         data.unitPrice < 0 ? 'Unit price cannot be negative.' :
         data.quantity <= 0 ? 'Quantity must be greater than 0.' :
         data.rate <= 0 ? 'Rate must be greater than 0.' :
-        data.sellingPrice < 0 ? 'Selling price cannot be negative.' :
+        data.unitSellingPrice < 0 ? 'Unit selling price cannot be negative.' :
         (data.additionalCost < 0 || data.additionalDiscount < 0) ? 'Additional cost/discount cannot be negative.' : '';
       if (problem) { errBox.innerHTML = errorHtml(problem); window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
 
@@ -723,7 +734,8 @@
             row('Total Price (MMK)', fmt(it.totalPriceMmk, 0, 2)) +
           '</dl></section>' +
           '<section class="card detail"><h2>Sale</h2><dl>' +
-            row('Selling Price (MMK)', fmt(it.sellingPrice, 0, 2)) + row('Net Amount (MMK)', net(it.netAmount)) +
+            row('Unit Selling Price (MMK)', fmt(it.unitSellingPrice, 0, 4)) + row('Selling Price (MMK)', fmt(it.sellingPrice, 0, 2)) +
+            row('Net Amount (MMK)', net(it.netAmount), '', true) +
           '</dl></section>' +
           '<section class="card detail"><h2>Adjustments</h2><dl>' +
             row('Additional Cost (MMK)', fmt(it.additionalCost, 0, 2)) + row('Additional Discount (MMK)', fmt(it.additionalDiscount, 0, 2)) +

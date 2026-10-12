@@ -35,7 +35,8 @@ const COLUMNS = [
   { key: 'totalPriceThb',      header: 'Total Price (THB)',           type: 'num' },
   { key: 'rate',               header: 'Rate',                        type: 'num' },
   { key: 'totalPriceMmk',      header: 'Total Price (MMK)',           type: 'num' },
-  { key: 'sellingPrice',       header: 'Selling Price (MMK)',         type: 'num' },
+  { key: 'unitSellingPrice',   header: 'Unit Selling Price (MMK)',    type: 'num' },
+  { key: 'sellingPrice',       header: 'Selling Price (MMK)',         type: 'num' },   // = Unit Selling Price x Quantity (computed by the server)
   { key: 'netAmount',          header: 'Net Amount (MMK)',            type: 'num' },
   { key: 'additionalCost',     header: 'Additional Cost (MMK)',       type: 'num' },
   { key: 'additionalDiscount', header: 'Additional Discount (MMK)',   type: 'num' },
@@ -76,9 +77,42 @@ function doPost(e) {
 
 /** Run once from the editor (optional): creates / upgrades the sheet and asks for permissions. */
 function setup() {
-  open_();
+  const o = open_();
+  const filled = backfillUnitSelling_(o);
   secret_();
-  Logger.log('Setup complete. Sheet "%s" is ready.', SHEET_NAME);
+  Logger.log('Setup complete. Sheet "%s" is ready.%s', SHEET_NAME,
+    filled ? ' Filled Unit Selling Price (MMK) for ' + filled + ' existing row(s).' : '');
+}
+
+/** Existing rows have no Unit Selling Price yet: fill it from Selling Price / Quantity. Never overwrites a value. */
+function backfillUnitSelling_(o) {
+  const last = o.sh.getLastRow();
+  const uCol = o.layout.indexOf('unitSellingPrice');
+  const sCol = o.layout.indexOf('sellingPrice');
+  const qCol = o.layout.indexOf('quantity');
+  if (last < 2 || uCol < 0 || sCol < 0 || qCol < 0) return 0;
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const data = o.sh.getRange(2, 1, last - 1, o.layout.length).getValues();
+    const out = [];
+    let filled = 0;
+    data.forEach(function (r) {
+      const blank = r[uCol] === '' || r[uCol] === null || r[uCol] === undefined;
+      const selling = Number(r[sCol]);
+      const qty = Number(r[qCol]);
+      if (blank && isFinite(selling) && selling > 0 && isFinite(qty) && qty > 0) {
+        out.push([round4_(selling / qty)]);
+        filled++;
+      } else {
+        out.push([r[uCol]]);
+      }
+    });
+    if (filled) o.sh.getRange(2, uCol + 1, out.length, 1).setValues(out);
+    return filled;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -255,6 +289,11 @@ function rowToItem_(row, layout) {
     }
     item[key] = v;
   });
+  // Rows saved before "Unit Selling Price" existed have it blank: derive it so editing such a row
+  // keeps its Selling Price unchanged (4 decimals, because Selling Price is rounded to 2).
+  if (!item.unitSellingPrice && item.sellingPrice > 0 && item.quantity > 0) {
+    item.unitSellingPrice = round4_(item.sellingPrice / item.quantity);
+  }
   return item;
 }
 
@@ -291,6 +330,7 @@ function findRow_(o, id) {
 /* ------------------------------------------------------------------ */
 
 function round2_(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
+function round4_(n) { return Math.round((n + Number.EPSILON) * 10000) / 10000; }
 
 /** Validates input and computes every derived field on the server (source of truth). */
 function build_(input) {
@@ -313,16 +353,19 @@ function build_(input) {
   const unitPrice = num(input.unitPrice);
   const quantity = num(input.quantity);
   const rate = num(input.rate);
-  const sellingPrice = num(input.sellingPrice);
+  const hasUnitSelling = input.unitSellingPrice !== undefined && input.unitSellingPrice !== null && input.unitSellingPrice !== '';
+  // Older clients sent a total `sellingPrice`; accept it by turning it into a unit price.
+  const unitSellingPrice = round4_(hasUnitSelling ? num(input.unitSellingPrice) : (quantity > 0 ? num(input.sellingPrice) / quantity : 0));
   const additionalCost = num(input.additionalCost);
   const additionalDiscount = num(input.additionalDiscount);
 
   if (unitPrice < 0) throw new Error('Unit price cannot be negative.');
   if (quantity <= 0) throw new Error('Quantity must be greater than 0.');
   if (rate <= 0) throw new Error('Rate must be greater than 0.');
-  if (sellingPrice < 0) throw new Error('Selling price cannot be negative.');
+  if (unitSellingPrice < 0) throw new Error('Unit selling price cannot be negative.');
   if (additionalCost < 0 || additionalDiscount < 0) throw new Error('Additional cost/discount cannot be negative.');
 
+  const sellingPrice = round2_(unitSellingPrice * quantity);
   const totalPriceThb = round2_(unitPrice * quantity);
   const totalPriceMmk = round2_(totalPriceThb * rate);
   const netAmount = round2_(sellingPrice - totalPriceMmk);
@@ -339,6 +382,7 @@ function build_(input) {
     totalPriceThb: totalPriceThb,
     rate: rate,
     totalPriceMmk: totalPriceMmk,
+    unitSellingPrice: unitSellingPrice,
     sellingPrice: sellingPrice,
     netAmount: netAmount,
     additionalCost: additionalCost,
