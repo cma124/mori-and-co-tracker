@@ -1,0 +1,6 @@
+# secrets and local-only files: never commit these
+.env
+.env.*
+.netlify/
+node_modules/
+.DS_Store
